@@ -13,27 +13,30 @@ const auditRoutes = require('./src/routes/auditRoutes')
 const app = express()
 const PORT = process.env.PORT || 5000
 
-// Configure CORS for local development and the deployed frontend.
+// Allow local development and the deployed Vercel frontend.
 const allowedOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'https://brandora-ai-chi.vercel.app',
   process.env.FRONTEND_URL,
 ].filter(Boolean)
 
 app.use(
   cors({
     origin(origin, callback) {
-      // Allow requests without an Origin header, such as health checks.
+      // Allow server-to-server requests and health checks without Origin.
       if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true)
       }
 
+      console.warn(`CORS blocked origin: ${origin}`)
       return callback(new Error('Origin not allowed by CORS'))
     },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 )
 
-// Parse JSON requests with a reasonable size limit.
 app.use(express.json({ limit: '1mb' }))
 
 // Health checks
@@ -51,7 +54,7 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-// Existing API routes
+// Existing API route modules
 app.use('/api/compliance', complianceRoutes)
 app.use('/api/approvals', approvalRoutes)
 app.use('/api/audit', auditRoutes)
@@ -74,8 +77,7 @@ app.get('/api/brands', async (req, res) => {
       brands: allBrands,
     })
   } catch (error) {
-    console.error('Get brands error:', error.message)
-
+    console.error('Get brands error:', error)
     res.status(500).json({
       success: false,
       message: 'Failed to fetch brands',
@@ -103,8 +105,7 @@ app.get('/api/brands/:id', async (req, res) => {
       },
     })
   } catch (error) {
-    console.error('Get brand error:', error.message)
-
+    console.error('Get brand error:', error)
     res.status(500).json({
       success: false,
       message: 'Failed to fetch brand',
@@ -131,6 +132,8 @@ app.post('/api/brands', async (req, res) => {
       })
     }
 
+    const now = new Date().toISOString()
+
     const brand = {
       name: name.trim(),
       industry: typeof industry === 'string' ? industry : '',
@@ -144,8 +147,8 @@ app.post('/api/brands', async (req, res) => {
       approvedClaims: Array.isArray(approvedClaims)
         ? approvedClaims
         : [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     }
 
     const id = crypto.randomUUID()
@@ -155,14 +158,10 @@ app.post('/api/brands', async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Brand created successfully',
-      brand: {
-        id,
-        ...brand,
-      },
+      brand: { id, ...brand },
     })
   } catch (error) {
-    console.error('Create brand error:', error.message)
-
+    console.error('Create brand error:', error)
     res.status(500).json({
       success: false,
       message: 'Failed to create brand',
@@ -193,7 +192,6 @@ app.put('/api/brands/:id', async (req, res) => {
           message: 'Brand name cannot be empty',
         })
       }
-
       updatedData.name = updates.name.trim()
     }
 
@@ -204,7 +202,6 @@ app.put('/api/brands/:id', async (req, res) => {
           message: 'Industry must be a string',
         })
       }
-
       updatedData.industry = updates.industry
     }
 
@@ -215,7 +212,6 @@ app.put('/api/brands/:id', async (req, res) => {
           message: 'Tone must be a string',
         })
       }
-
       updatedData.tone = updates.tone
     }
 
@@ -231,7 +227,6 @@ app.put('/api/brands/:id', async (req, res) => {
             message: `${field} must be an array`,
           })
         }
-
         updatedData[field] = updates[field]
       }
     }
@@ -251,8 +246,7 @@ app.put('/api/brands/:id', async (req, res) => {
       },
     })
   } catch (error) {
-    console.error('Update brand error:', error.message)
-
+    console.error('Update brand error:', error)
     res.status(500).json({
       success: false,
       message: 'Failed to update brand',
@@ -266,7 +260,7 @@ app.delete('/api/brands/:id', async (req, res) => {
     const docRef = brands.doc(req.params.id)
     const doc = await docRef.get()
 
-    if (!doc.exists) {
+    if (!(await docRef.get()).exists) {
       return res.status(404).json({
         success: false,
         message: 'Brand not found',
@@ -280,8 +274,7 @@ app.delete('/api/brands/:id', async (req, res) => {
       message: 'Brand deleted successfully',
     })
   } catch (error) {
-    console.error('Delete brand error:', error.message)
-
+    console.error('Delete brand error:', error)
     res.status(500).json({
       success: false,
       message: 'Failed to delete brand',
@@ -297,7 +290,7 @@ app.use('/api', (req, res) => {
   })
 })
 
-// Handle malformed JSON
+// Error handler
 app.use((error, req, res, next) => {
   if (error.type === 'entity.parse.failed') {
     return res.status(400).json({
@@ -313,7 +306,7 @@ app.use((error, req, res, next) => {
     })
   }
 
-  console.error('Unhandled server error:', error.message)
+  console.error('Unhandled server error:', error)
 
   res.status(500).json({
     success: false,
@@ -321,7 +314,6 @@ app.use((error, req, res, next) => {
   })
 })
 
-// Start the server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Brandora AI API running on port ${PORT}`)
 })
