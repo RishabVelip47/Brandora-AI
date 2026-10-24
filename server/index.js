@@ -1,22 +1,61 @@
 
 const express = require('express')
 const cors = require('cors')
-const complianceRoutes = require('./src/routes/complianceRoutes')
-const approvalRoutes = require('./src/routes/approvalRoutes')
-const auditRoutes = require('./src/routes/auditRoutes')
 const crypto = require('crypto')
 require('dotenv').config()
 
 const { db } = require('./src/config/firebase')
 
+const complianceRoutes = require('./src/routes/complianceRoutes')
+const approvalRoutes = require('./src/routes/approvalRoutes')
+const auditRoutes = require('./src/routes/auditRoutes')
+
 const app = express()
 const PORT = process.env.PORT || 5000
 
-app.use(cors())
-app.use(express.json())
+// Configure CORS for local development and the deployed frontend.
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  process.env.FRONTEND_URL,
+].filter(Boolean)
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow requests without an Origin header, such as health checks.
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true)
+      }
+
+      return callback(new Error('Origin not allowed by CORS'))
+    },
+  })
+)
+
+// Parse JSON requests with a reasonable size limit.
+app.use(express.json({ limit: '1mb' }))
+
+// Health checks
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Brandora AI backend is running',
+  })
+})
+
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Brandora AI backend is running',
+  })
+})
+
+// Existing API routes
 app.use('/api/compliance', complianceRoutes)
 app.use('/api/approvals', approvalRoutes)
 app.use('/api/audit', auditRoutes)
+
 // Firestore brands collection
 const brands = db.collection('brands')
 
@@ -36,6 +75,7 @@ app.get('/api/brands', async (req, res) => {
     })
   } catch (error) {
     console.error('Get brands error:', error.message)
+
     res.status(500).json({
       success: false,
       message: 'Failed to fetch brands',
@@ -64,6 +104,7 @@ app.get('/api/brands/:id', async (req, res) => {
     })
   } catch (error) {
     console.error('Get brand error:', error.message)
+
     res.status(500).json({
       success: false,
       message: 'Failed to fetch brand',
@@ -81,7 +122,7 @@ app.post('/api/brands', async (req, res) => {
       preferredTerms,
       prohibitedPhrases,
       approvedClaims,
-    } = req.body
+    } = req.body || {}
 
     if (typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({
@@ -92,8 +133,8 @@ app.post('/api/brands', async (req, res) => {
 
     const brand = {
       name: name.trim(),
-      industry: industry || '',
-      tone: tone || '',
+      industry: typeof industry === 'string' ? industry : '',
+      tone: typeof tone === 'string' ? tone : '',
       preferredTerms: Array.isArray(preferredTerms)
         ? preferredTerms
         : [],
@@ -121,6 +162,7 @@ app.post('/api/brands', async (req, res) => {
     })
   } catch (error) {
     console.error('Create brand error:', error.message)
+
     res.status(500).json({
       success: false,
       message: 'Failed to create brand',
@@ -141,11 +183,11 @@ app.put('/api/brands/:id', async (req, res) => {
       })
     }
 
-    const updates = req.body
+    const updates = req.body || {}
     const updatedData = {}
 
-    if (typeof updates.name === 'string') {
-      if (!updates.name.trim()) {
+    if (Object.prototype.hasOwnProperty.call(updates, 'name')) {
+      if (typeof updates.name !== 'string' || !updates.name.trim()) {
         return res.status(400).json({
           success: false,
           message: 'Brand name cannot be empty',
@@ -155,41 +197,62 @@ app.put('/api/brands/:id', async (req, res) => {
       updatedData.name = updates.name.trim()
     }
 
-    if (typeof updates.industry === 'string') {
+    if (Object.prototype.hasOwnProperty.call(updates, 'industry')) {
+      if (typeof updates.industry !== 'string') {
+        return res.status(400).json({
+          success: false,
+          message: 'Industry must be a string',
+        })
+      }
+
       updatedData.industry = updates.industry
     }
 
-    if (typeof updates.tone === 'string') {
+    if (Object.prototype.hasOwnProperty.call(updates, 'tone')) {
+      if (typeof updates.tone !== 'string') {
+        return res.status(400).json({
+          success: false,
+          message: 'Tone must be a string',
+        })
+      }
+
       updatedData.tone = updates.tone
     }
 
-    if (Array.isArray(updates.preferredTerms)) {
-      updatedData.preferredTerms = updates.preferredTerms
-    }
+    for (const field of [
+      'preferredTerms',
+      'prohibitedPhrases',
+      'approvedClaims',
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(updates, field)) {
+        if (!Array.isArray(updates[field])) {
+          return res.status(400).json({
+            success: false,
+            message: `${field} must be an array`,
+          })
+        }
 
-    if (Array.isArray(updates.prohibitedPhrases)) {
-      updatedData.prohibitedPhrases = updates.prohibitedPhrases
-    }
-
-    if (Array.isArray(updates.approvedClaims)) {
-      updatedData.approvedClaims = updates.approvedClaims
+        updatedData[field] = updates[field]
+      }
     }
 
     updatedData.updatedAt = new Date().toISOString()
 
     await docRef.update(updatedData)
 
+    const updatedDoc = await docRef.get()
+
     res.json({
       success: true,
       message: 'Brand updated successfully',
       brand: {
-        id: doc.id,
-        ...doc.data(),
-        ...updatedData,
+        id: updatedDoc.id,
+        ...updatedDoc.data(),
       },
     })
   } catch (error) {
     console.error('Update brand error:', error.message)
+
     res.status(500).json({
       success: false,
       message: 'Failed to update brand',
@@ -218,6 +281,7 @@ app.delete('/api/brands/:id', async (req, res) => {
     })
   } catch (error) {
     console.error('Delete brand error:', error.message)
+
     res.status(500).json({
       success: false,
       message: 'Failed to delete brand',
@@ -225,14 +289,39 @@ app.delete('/api/brands/:id', async (req, res) => {
   }
 })
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Brandora AI backend is running',
+// Handle unknown API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'API endpoint not found',
   })
 })
 
-app.listen(PORT, () => {
-  console.log(`Brandora AI API running at http://localhost:${PORT}`)
+// Handle malformed JSON
+app.use((error, req, res, next) => {
+  if (error.type === 'entity.parse.failed') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid JSON request body',
+    })
+  }
+
+  if (error.message === 'Origin not allowed by CORS') {
+    return res.status(403).json({
+      success: false,
+      message: 'Origin not allowed',
+    })
+  }
+
+  console.error('Unhandled server error:', error.message)
+
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+  })
+})
+
+// Start the server
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Brandora AI API running on port ${PORT}`)
 })
