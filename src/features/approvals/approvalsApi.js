@@ -1,5 +1,9 @@
-const API_URL = 'http://localhost:5000/api/approvals'
-
+const API_URL = `${
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV
+    ? 'http://localhost:5000/api'
+    : 'https://brandora-ai.onrender.com/api')
+}/approvals`
 export async function fetchApprovals() {
   const response = await fetch(API_URL)
   const data = await response.json()
